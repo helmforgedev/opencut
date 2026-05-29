@@ -1,0 +1,96 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Build and Push
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      opencut_version:
+        description: OpenCut release tag to build
+        required: false
+        default: v0.3.0
+  schedule:
+    - cron: "0 3 * * 0"
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  DEFAULT_OPENCUT_VERSION: v0.3.0
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Resolve OpenCut version
+        id: version
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.opencut_version }}
+        run: |
+          VERSION="${INPUT_VERSION:-$DEFAULT_OPENCUT_VERSION}"
+          echo "opencut_version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "opencut_version_short=${VERSION#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          build-args: |
+            OPENCUT_VERSION=${{ steps.version.outputs.opencut_version }}
+          tags: |
+            docker.io/helmforge/opencut:latest
+            docker.io/helmforge/opencut:${{ steps.version.outputs.opencut_version }}
+            docker.io/helmforge/opencut:${{ steps.version.outputs.opencut_version_short }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+          sbom: true
+          provenance: true
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image with Cosign
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          cosign sign --yes docker.io/helmforge/opencut@${DIGEST}
+
+      - name: Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          image-ref: docker.io/helmforge/opencut:${{ steps.version.outputs.opencut_version }}
+          format: table
+          severity: CRITICAL,HIGH
+
+      - name: Generate SBOM
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          image-ref: docker.io/helmforge/opencut:${{ steps.version.outputs.opencut_version }}
+          format: cyclonedx
+          output: sbom.json
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-opencut-${{ steps.version.outputs.opencut_version_short }}
+          path: sbom.json

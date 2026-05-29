@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: Apache-2.0
+.DS_Store
+*.log
+dist/
+node_modules/
+.env
+.env.*
+!.env.example

@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: Apache-2.0
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: helmforge/opencut:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test
+        run: |
+          docker run -d --name opencut -p 3000:3000 helmforge/opencut:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3000/ >/tmp/opencut.html; then
+              grep -qi "opencut" /tmp/opencut.html
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs opencut
+          exit 1
+
+      - name: Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          image-ref: helmforge/opencut:ci
+          format: table
+          exit-code: "1"
+          severity: CRITICAL
+          ignore-unfixed: true
+
+      - name: Trivy vulnerability report
+        if: always()
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          image-ref: helmforge/opencut:ci
+          format: table
+          exit-code: "0"
+          severity: CRITICAL,HIGH
+
+      - name: Generate SBOM
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          image-ref: helmforge/opencut:ci
+          format: cyclonedx
+          output: sbom.json
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-ci
+          path: sbom.json

@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: Apache-2.0
+.git
+.github
+README.md
+*.md
+*.log
+tmp
