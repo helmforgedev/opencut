@@ -19,6 +19,7 @@ permissions:
 
 env:
   DEFAULT_OPENCUT_VERSION: v0.3.0
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build-push:
